@@ -1,5 +1,7 @@
 # Paseo Dashboard
 
+<img width="1674" height="1028" alt="image" src="https://github.com/user-attachments/assets/f6ee0385-167a-4366-9ba0-f692253f3e17" />
+
 Paseo Dashboard shows live workspace and agent activity in one board. Unread, Needs attention, and Running are determined from Paseo's workspace and agent state; the plugin does not read or write workspace labels.
 
 The three agent activity columns remain automatic and cannot be removed; their names, colors, and order are customizable. Workspace organization columns can be added, renamed, recolored, reordered, and removed; workspaces can be dragged between them. Column settings, workspace assignments, and ordering are saved host-wide. The dashboard also supports saved project views, search, pull request details, and live updates.
