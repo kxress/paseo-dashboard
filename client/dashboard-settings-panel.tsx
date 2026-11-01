@@ -2,11 +2,10 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useSettings } from "@getpaseo/plugin/client";
 import {
   SettingsCard,
-  SettingsInput,
-  type SettingsInputHandle,
   SettingsSection,
 } from "@getpaseo/plugin/client/ui";
-import { useEffect, useRef, useState } from "react";
+import { TextInput } from "@getpaseo/plugin/client/react-native";
+import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import {
   DASHBOARD_COLUMN_LIMIT,
@@ -36,7 +35,6 @@ export function DashboardSettingsPanel({ theme, layout }: PluginSurfaceProps) {
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
-  const refs = useRef(new Map<string, SettingsInputHandle>());
 
   useEffect(() => {
     if (settings.status !== "ready") return;
@@ -46,14 +44,6 @@ export function DashboardSettingsPanel({ theme, layout }: PluginSurfaceProps) {
     setColumns(next);
     setActivityColumns(nextActivityColumns);
     setActivityColumnOrder(nextActivityOrder);
-    for (const column of next) {
-      refs.current.get(`${column.id}:name`)?.replaceText(column.name);
-      refs.current.get(`${column.id}:color`)?.replaceText(column.color);
-    }
-    for (const id of ACTIVITY_COLUMN_IDS) {
-      refs.current.get(`${id}:name`)?.replaceText(nextActivityColumns[id].name);
-      refs.current.get(`${id}:color`)?.replaceText(nextActivityColumns[id].color);
-    }
     setDirty(false);
     setSaved(false);
     setError("");
@@ -158,6 +148,116 @@ export function DashboardSettingsPanel({ theme, layout }: PluginSurfaceProps) {
   const colors = theme.colors;
   const titleStyle = { color: colors.foreground, fontSize: 22, fontWeight: "700" as const };
   const hintStyle = { color: colors.foregroundMuted, fontSize: 13, lineHeight: 19 };
+  const fieldLabelStyle = { color: colors.foregroundMuted, fontSize: 11, fontWeight: "600" as const };
+  const inputFrameStyle = {
+    minHeight: 40,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    backgroundColor: colors.surface1,
+  };
+  const inputTextStyle = {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    color: colors.foreground,
+    fontSize: 13,
+  };
+  const actionButtonStyle = {
+    minHeight: 32,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 7,
+    backgroundColor: colors.surface1,
+  };
+  const renderColumnCard = (column: {
+    id: string;
+    title: string;
+    name: string;
+    color: string;
+    index: number;
+    count: number;
+    onNameChange: (value: string) => void;
+    onColorChange: (value: string) => void;
+    onMove: (direction: -1 | 1) => void;
+    onRemove?: () => void;
+  }) => {
+    const validColor = /^#[0-9a-fA-F]{6}$/.test(column.color);
+    const moveButton = (direction: -1 | 1, label: string, disabled: boolean) => (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${label} ${column.title}`}
+        disabled={disabled}
+        onPress={() => column.onMove(direction)}
+        style={[actionButtonStyle, { opacity: disabled ? 0.45 : 1 }]}
+      >
+        <Text style={{ color: disabled ? colors.foregroundMuted : colors.foreground, fontSize: 12, fontWeight: "600" }}>{label}</Text>
+      </Pressable>
+    );
+
+    return (
+      <SettingsCard key={column.id}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+          <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 9 }}>
+            <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: validColor ? column.color : colors.foregroundMuted }} />
+            <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 13, fontWeight: "700" }}>{column.title}</Text>
+          </View>
+          <View style={{ flexDirection: "row", gap: 6 }}>
+            {moveButton(-1, "Up", column.index === 0)}
+            {moveButton(1, "Down", column.index === column.count - 1)}
+            {column.onRemove ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${column.title} column`}
+                disabled={column.count <= 1}
+                onPress={column.onRemove}
+                style={[actionButtonStyle, { borderColor: colors.statusDanger, opacity: column.count <= 1 ? 0.45 : 1 }]}
+              >
+                <Text style={{ color: colors.statusDanger, fontSize: 12, fontWeight: "600" }}>Remove</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={{ flexDirection: layout.compact ? "column" : "row", gap: 12, padding: 12 }}>
+          <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+            <Text style={fieldLabelStyle}>Column name</Text>
+            <View style={inputFrameStyle}>
+              <TextInput
+                accessibilityLabel={`${column.title} column name`}
+                value={column.name}
+                onChangeText={column.onNameChange}
+                placeholder="Column name"
+                placeholderTextColor={colors.foregroundMuted}
+                maxLength={40}
+                style={inputTextStyle}
+              />
+            </View>
+          </View>
+          <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+            <Text style={fieldLabelStyle}>Accent color</Text>
+            <View style={[inputFrameStyle, { flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 10 }]}>
+              <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: validColor ? column.color : colors.foregroundMuted }} />
+              <TextInput
+                accessibilityLabel={`${column.title} accent color`}
+                value={column.color}
+                onChangeText={column.onColorChange}
+                placeholder="#94A3B8"
+                placeholderTextColor={colors.foregroundMuted}
+                autoCapitalize="characters"
+                maxLength={7}
+                style={[inputTextStyle, { paddingLeft: 0 }]}
+              />
+            </View>
+          </View>
+        </View>
+      </SettingsCard>
+    );
+  };
 
   return (
     <View style={{ flex: 1, padding: layout.compact ? 14 : 24, gap: 18, backgroundColor: colors.surface0 }}>
@@ -179,53 +279,17 @@ export function DashboardSettingsPanel({ theme, layout }: PluginSurfaceProps) {
           <SettingsSection title="Agent activity columns">
             <Text style={hintStyle}>These columns always stay in the board and keep their automatic activity grouping. Reorder them and customize their names and colors.</Text>
             <View style={{ gap: 10, marginTop: 12 }}>
-              {activityColumnOrder.map((id, index) => (
-                <SettingsCard key={id}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                    <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "700" }}>{DEFAULT_ACTIVITY_COLUMN_NAMES[id]}</Text>
-                    <View style={{ flexDirection: "row", gap: 6 }}>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Move ${activityColumns[id].name} up`}
-                        disabled={index === 0}
-                        onPress={() => moveActivityColumn(id, -1)}
-                        style={{ paddingHorizontal: 9, paddingVertical: 7, borderWidth: 1, borderColor: colors.border, borderRadius: 7, opacity: index === 0 ? 0.45 : 1 }}
-                      ><Text style={{ color: colors.foreground }}>Up</Text></Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Move ${activityColumns[id].name} down`}
-                        disabled={index === activityColumnOrder.length - 1}
-                        onPress={() => moveActivityColumn(id, 1)}
-                        style={{ paddingHorizontal: 9, paddingVertical: 7, borderWidth: 1, borderColor: colors.border, borderRadius: 7, opacity: index === activityColumnOrder.length - 1 ? 0.45 : 1 }}
-                      ><Text style={{ color: colors.foreground }}>Down</Text></Pressable>
-                    </View>
-                  </View>
-                  <SettingsInput
-                    ref={(input) => {
-                      if (input) refs.current.set(`${id}:name`, input);
-                      else refs.current.delete(`${id}:name`);
-                    }}
-                    label="Column name"
-                    initialValue={activityColumns[id].name}
-                    onChangeText={(value) => updateActivity(id, "name", value)}
-                  />
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                    <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: /^#[0-9a-fA-F]{6}$/.test(activityColumns[id].color) ? activityColumns[id].color : colors.foregroundMuted }} />
-                    <View style={{ flex: 1 }}>
-                      <SettingsInput
-                        ref={(input) => {
-                          if (input) refs.current.set(`${id}:color`, input);
-                          else refs.current.delete(`${id}:color`);
-                        }}
-                        label="Accent color (hex)"
-                        initialValue={activityColumns[id].color}
-                        onChangeText={(value) => updateActivity(id, "color", value)}
-                        placeholder="#4ADE80"
-                      />
-                    </View>
-                  </View>
-                </SettingsCard>
-              ))}
+              {activityColumnOrder.map((id, index) => renderColumnCard({
+                id,
+                title: activityColumns[id].name || DEFAULT_ACTIVITY_COLUMN_NAMES[id],
+                name: activityColumns[id].name,
+                color: activityColumns[id].color,
+                index,
+                count: activityColumnOrder.length,
+                onNameChange: (value) => updateActivity(id, "name", value),
+                onColorChange: (value) => updateActivity(id, "color", value),
+                onMove: (direction) => moveActivityColumn(id, direction),
+              }))}
             </View>
           </SettingsSection>
 
@@ -234,63 +298,18 @@ export function DashboardSettingsPanel({ theme, layout }: PluginSurfaceProps) {
               Rename, recolor, reorder, add, or remove these columns. Drag workspaces between them to organize your board. Maximum {DASHBOARD_COLUMN_LIMIT}.
             </Text>
             <View style={{ gap: 10, marginTop: 12 }}>
-              {columns.map((column, index) => (
-                <SettingsCard key={column.id}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                    <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "700" }}>
-                      Column {index + 1}
-                    </Text>
-                    <View style={{ flexDirection: "row", gap: 6 }}>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Move ${column.name} up`}
-                        disabled={index === 0}
-                        onPress={() => moveColumn(column.id, -1)}
-                        style={{ paddingHorizontal: 9, paddingVertical: 7, borderWidth: 1, borderColor: colors.border, borderRadius: 7, opacity: index === 0 ? 0.45 : 1 }}
-                      ><Text style={{ color: colors.foreground }}>Up</Text></Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Move ${column.name} down`}
-                        disabled={index === columns.length - 1}
-                        onPress={() => moveColumn(column.id, 1)}
-                        style={{ paddingHorizontal: 9, paddingVertical: 7, borderWidth: 1, borderColor: colors.border, borderRadius: 7, opacity: index === columns.length - 1 ? 0.45 : 1 }}
-                      ><Text style={{ color: colors.foreground }}>Down</Text></Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Remove ${column.name} column`}
-                        disabled={columns.length <= 1}
-                        onPress={() => removeColumn(column.id)}
-                        style={{ paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: colors.border, borderRadius: 7, opacity: columns.length <= 1 ? 0.45 : 1 }}
-                      ><Text style={{ color: colors.foreground }}>Remove</Text></Pressable>
-                    </View>
-                  </View>
-                  <SettingsInput
-                    ref={(input) => {
-                      if (input) refs.current.set(`${column.id}:name`, input);
-                      else refs.current.delete(`${column.id}:name`);
-                    }}
-                    label="Column name"
-                    initialValue={column.name}
-                    onChangeText={(value) => update(column.id, "name", value)}
-                    placeholder="Column name"
-                  />
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                    <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: /^#[0-9a-fA-F]{6}$/.test(column.color) ? column.color : colors.foregroundMuted }} />
-                    <View style={{ flex: 1 }}>
-                      <SettingsInput
-                        ref={(input) => {
-                          if (input) refs.current.set(`${column.id}:color`, input);
-                          else refs.current.delete(`${column.id}:color`);
-                        }}
-                        label="Accent color (hex)"
-                        initialValue={column.color}
-                        onChangeText={(value) => update(column.id, "color", value)}
-                        placeholder="#94A3B8"
-                      />
-                    </View>
-                  </View>
-                </SettingsCard>
-              ))}
+              {columns.map((column, index) => renderColumnCard({
+                id: column.id,
+                title: `Column ${index + 1}`,
+                name: column.name,
+                color: column.color,
+                index,
+                count: columns.length,
+                onNameChange: (value) => update(column.id, "name", value),
+                onColorChange: (value) => update(column.id, "color", value),
+                onMove: (direction) => moveColumn(column.id, direction),
+                onRemove: () => removeColumn(column.id),
+              }))}
               <Pressable
                 accessibilityRole="button"
                 disabled={columns.length >= DASHBOARD_COLUMN_LIMIT}
