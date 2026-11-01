@@ -1,0 +1,6 @@
+{
+  "id": "paseo-dashboard",
+  "name": "Paseo Dashboard",
+  "description": "A live workspace dashboard with customizable organization columns.",
+  "requirements": { "paseo": ">=0.12.0" }
+}
