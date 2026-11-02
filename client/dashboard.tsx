@@ -55,6 +55,13 @@ interface WorkspaceCardData {
   isRunning: boolean;
 }
 
+interface TabCardData {
+  agent: DashboardAgent;
+  workspace: PaseoWorkspace;
+  queue: QueueId;
+  detail: string;
+}
+
 interface DashboardData {
   workspaces: PaseoWorkspace[];
   agents: PaseoAgent[];
@@ -168,6 +175,36 @@ function queueAfterManualOverride(
 
 function isVisibleAgent(agent: DashboardAgent): boolean {
   return !agent.archivedAt && !agent.internal && !agent.background;
+}
+
+function classifyAgent(agent: DashboardAgent): { queue: AutomaticQueueId; detail: string } {
+  const attentionKinds = new Set<AttentionKind>();
+  const permissionTitles: string[] = [];
+  for (const permission of agent.pendingPermissions ?? []) {
+    attentionKinds.add(permission.kind === "question" ? "Question" : "Permission");
+    const title = permission.title?.trim() || permission.name?.trim();
+    if (title) permissionTitles.push(title);
+  }
+  if (agent.requiresAttention) {
+    if (agent.attentionReason === "permission" && !(agent.pendingPermissions?.length))
+      attentionKinds.add("Permission");
+    if (agent.attentionReason === "error") attentionKinds.add("Error");
+  }
+  if (agent.status === "error") attentionKinds.add("Error");
+
+  if (attentionKinds.size) {
+    const labels = (["Permission", "Question", "Error"] as const).filter((kind) => attentionKinds.has(kind));
+    const detail = permissionTitles.length
+      ? [...new Set(permissionTitles)].slice(0, 2).join(" · ")
+      : agent.lastError?.trim() || labels.join(" · ");
+    return { queue: "needs-attention", detail };
+  }
+  if (agent.requiresAttention) {
+    return { queue: "unread", detail: agent.attentionReason === "finished" ? "Finished with unread activity" : "Unread activity" };
+  }
+  if (agent.status === "initializing" || agent.status === "running")
+    return { queue: "running", detail: agent.status === "initializing" ? "Starting" : "Agent is running" };
+  return { queue: "idle", detail: agent.status === "closed" ? "Closed" : "No active or unread activity" };
 }
 
 function classifyWorkspace(
@@ -759,6 +796,7 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
   const [mobileActiveQueue, setMobileActiveQueue] = useState<QueueId | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [search, setSearch] = useState("");
+  const [dashboardMode, setDashboardMode] = useState<"workspaces" | "tabs">("workspaces");
   const [selectedViewId, setSelectedViewId] = useState(params.viewId ?? "");
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [viewPickerLeft, setViewPickerLeft] = useState(0);
@@ -1151,6 +1189,51 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
     } as Record<string, WorkspaceCardData[]> & { unread: WorkspaceCardData[]; needsAttention: WorkspaceCardData[]; running: WorkspaceCardData[]; total: number };
   }, [activeProjectIds, data, search, queueArrivals, queueOverrideMap, workspaceOrderIndices, manualQueues]);
 
+  const tabCards = useMemo(() => {
+    const workspaces = new Map<string, PaseoWorkspace>();
+    for (const workspace of data?.workspaces ?? []) {
+      if (workspace.internal || workspace.background || workspace.archivingAt) continue;
+      if (activeProjectIds && !activeProjectIds.has(workspace.projectId)) continue;
+      workspaces.set(workspace.id, workspace);
+    }
+
+    const query = search.trim().toLocaleLowerCase();
+    const cards: TabCardData[] = [];
+    for (const rawAgent of data?.agents ?? []) {
+      const agent = rawAgent as DashboardAgent;
+      if (!isVisibleAgent(agent) || !agent.workspaceId) continue;
+      const workspace = workspaces.get(agent.workspaceId);
+      if (!workspace) continue;
+      const projectName = workspace.projectCustomName?.trim() || workspace.projectDisplayName;
+      if (query) {
+        const searchText = [
+          agent.title,
+          agent.provider,
+          agent.model,
+          workspace.title,
+          workspace.name,
+          projectName,
+          workspace.projectRootPath,
+        ].filter(Boolean).join(" ").toLocaleLowerCase();
+        if (!searchText.includes(query)) continue;
+      }
+      const classification = classifyAgent(agent);
+      cards.push({
+        agent,
+        workspace,
+        queue: queueAfterManualOverride(
+          classification.queue,
+          queueOverrideMap.get(workspace.id),
+          manualQueues,
+        ),
+        detail: classification.detail,
+      });
+    }
+    return cards.sort((left, right) =>
+      Date.parse(right.agent.updatedAt) - Date.parse(left.agent.updatedAt),
+    );
+  }, [activeProjectIds, data, search, queueOverrideMap, manualQueues]);
+
   const queueEntries: Array<[QueueId, WorkspaceCardData[]]> = [
     ["unread", grouped.unread],
     ["needs-attention", grouped.needsAttention],
@@ -1251,6 +1334,25 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
       borderRadius: 6,
       backgroundColor: colors.surface1,
     },
+    modeSwitch: {
+      flexDirection: "row" as const,
+      alignItems: "center" as const,
+      gap: 2,
+      padding: 2,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 7,
+      backgroundColor: colors.surface1,
+    },
+    modeButton: {
+      minHeight: 24,
+      justifyContent: "center" as const,
+      paddingHorizontal: 8,
+      borderRadius: 5,
+    },
+    modeButtonSelected: { backgroundColor: colors.surface2 },
+    modeButtonText: { color: colors.foregroundMuted, fontSize: 10, fontWeight: "600" as const },
+    modeButtonTextSelected: { color: colors.foreground },
     buttonText: { color: colors.foregroundMuted, fontSize: 12, fontWeight: "600" as const },
     toolbar: { flexDirection: compact ? ("column" as const) : ("row" as const), gap: 7 },
     searchBox: {
@@ -1412,6 +1514,21 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
       borderRadius: 8,
       backgroundColor: colors.surface0,
     },
+    tabCards: {
+      flexDirection: "row" as const,
+      flexWrap: "wrap" as const,
+      alignContent: "flex-start" as const,
+      gap: WORKSPACE_CARD_GAP,
+      padding: boardPadding,
+    },
+    tabCard: {
+      flexGrow: 1,
+      flexBasis: compact ? "100%" as const : 260,
+      minWidth: compact ? 0 : 230,
+      maxWidth: compact ? undefined : 400,
+      borderLeftWidth: 3,
+    },
+    tabCardDisabled: { opacity: 0.65 },
     dragPreview: {
       position: "absolute" as const,
       left: 0,
@@ -1542,6 +1659,11 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
   const canOpenWorkspace = Boolean(navigation?.openWorkspace);
   const openWorkspace = (workspaceId: string): void => {
     navigation?.openWorkspace({ workspaceId, serverId: host.id });
+  };
+  const canOpenAgent = Boolean(navigation?.openAgent);
+  const openAgent = (agentId: string, workspaceId: string): void => {
+    if (navigation?.openAgent) navigation.openAgent({ agentId, serverId: host.id });
+    else openWorkspace(workspaceId);
   };
 
   const openNewView = (): void => {
@@ -2556,7 +2678,7 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
       <View style={styles.header}>
         <View style={styles.headingRow}>
           <Text style={styles.heading}>Paseo Dashboard</Text>
-          <Text style={styles.total}>{grouped.total} total</Text>
+          <Text style={styles.total}>{dashboardMode === "tabs" ? tabCards.length : grouped.total} total</Text>
           <View
             style={styles.viewPickerWrap}
             onLayout={(event) => setViewPickerLeft(event.nativeEvent.layout.x)}
@@ -2573,6 +2695,24 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
             </Pressable>
           </View>
           <View style={styles.headerActions}>
+            <View accessibilityLabel="Dashboard display mode" style={styles.modeSwitch}>
+              {(["workspaces", "tabs"] as const).map((mode) => {
+                const selected = dashboardMode === mode;
+                const label = mode === "workspaces" ? "Workspaces" : "Agent tabs";
+                return (
+                  <Pressable
+                    key={mode}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Show ${mode === "workspaces" ? "workspace" : "individual agent tab"} cards`}
+                    accessibilityState={{ selected }}
+                    onPress={() => setDashboardMode(mode)}
+                    style={[styles.modeButton, selected && styles.modeButtonSelected]}
+                  >
+                    <Text style={[styles.modeButtonText, selected && styles.modeButtonTextSelected]}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
             {activeView ? (
               <Pressable accessibilityLabel={`Edit ${activeView.name}`} accessibilityRole="button" onPress={() => openEditView(activeView)} style={styles.iconButton}>
                 <Text style={styles.buttonText}>Edit</Text>
@@ -2658,7 +2798,54 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
             boardViewRef.current?.measureInWindow((x, y) => { boardWindowOriginRef.current = { x, y }; });
           }}
         >
-          {compact ? mobileBoard : stackBoardGroups ? (
+          {dashboardMode === "tabs" ? (
+            <ScrollView
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              style={styles.boardPageScroll}
+              contentContainerStyle={styles.tabCards}
+            >
+              {tabCards.map((card) => {
+                const title = card.agent.title?.trim() || card.agent.model || card.agent.provider;
+                const projectName = card.workspace.projectCustomName?.trim() || card.workspace.projectDisplayName;
+                const canOpen = canOpenAgent || canOpenWorkspace;
+                return (
+                  <Pressable
+                    key={card.agent.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open tab ${title}`}
+                    disabled={!canOpen}
+                    onPress={() => openAgent(card.agent.id, card.workspace.id)}
+                    style={[
+                      styles.workspaceCard,
+                      styles.tabCard,
+                      { borderLeftColor: columnAccents[card.queue] },
+                      !canOpen && styles.tabCardDisabled,
+                    ]}
+                  >
+                    <Text style={styles.cardTitle} numberOfLines={2}>{title}</Text>
+                    <Text style={styles.cardProject} numberOfLines={1}>
+                      {card.agent.provider}{card.agent.model ? ` · ${card.agent.model}` : ""}
+                    </Text>
+                    <Text style={styles.cardProject} numberOfLines={1}>
+                      {card.workspace.title?.trim() || card.workspace.name} · {projectName}
+                    </Text>
+                    {card.detail !== "No active or unread activity" ? (
+                      <Text style={styles.cardDetail} numberOfLines={1}>{card.detail}</Text>
+                    ) : null}
+                    <View style={styles.cardFooter}>
+                      <View style={[styles.stateDot, { backgroundColor: columnAccents[card.queue] }]} />
+                      <Text style={styles.stateText}>{columnNames[card.queue]}</Text>
+                      <Text style={styles.cardActivity} numberOfLines={1}>
+                        {formatActivityDate(card.agent.updatedAt)}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+              {!tabCards.length ? <Text style={styles.empty}>No tabs found.</Text> : null}
+            </ScrollView>
+          ) : compact ? mobileBoard : stackBoardGroups ? (
             <ScrollView
               nestedScrollEnabled
               showsVerticalScrollIndicator
@@ -2668,7 +2855,7 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
               {boardScrollView}
             </ScrollView>
           ) : boardScrollView}
-          {dragPreview && dragPreviewCard ? (
+          {dashboardMode === "workspaces" && dragPreview && dragPreviewCard ? (
             <Animated.View
               pointerEvents="none"
               style={[
@@ -2713,7 +2900,7 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
               </View>
             </Animated.View>
           ) : null}
-          {activityFlights.map((flight) => {
+          {dashboardMode === "workspaces" ? activityFlights.map((flight) => {
             const card = workspaceCards.find((item) => item.workspace.id === flight.workspaceId);
             const motion = activityFlightMotionsRef.current.get(flight.workspaceId);
             if (!card || !motion) return null;
@@ -2738,7 +2925,7 @@ export function AgentDashboard({ theme, layout, host, navigation, params }: Plug
                 {renderFloatingCardContents(card)}
               </Animated.View>
             );
-          })}
+          }) : null}
         </View>
       ) : null}
 

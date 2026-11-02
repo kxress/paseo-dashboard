@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "A live Paseo workspace dashboard with customizable organization columns.",
+  "description": "A live Paseo workspace and agent tab dashboard with customizable organization columns.",
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
